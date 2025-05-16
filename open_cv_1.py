@@ -1,132 +1,79 @@
 import cv2
 import os
 import numpy as np
-import pickle
 import requests
-from datetime import datetime, timedelta
-import json
+import face_recognition
 
 # Azure Face API configuration
 endpoint = "https://rtp.cognitiveservices.azure.com/"
 subscription_key = "3sBK0dd8hOkxfJv22qSlF84xPRrab0xQKpNWpqPJCWgyhwjiwKGhJQQJ99BEACGhslBXJ3w3AAAKACOGxOOZ"
 detect_url = f"{endpoint}/face/v1.0/detect"
-attendance = {}
-last_seen = {}
-lockout_period = timedelta(minutes=5)
 
 # Path to the directory containing known face images
-path = 'Images'
-images = []
-classNames = []
-face_ids = {}
+path = r'student_images'
+known_encodings = []
+known_names = []
 
-# Load and process known face images
-def load_known_faces():
-    pathlist = os.listdir(path)
-    
-    for img in pathlist:
-        # Read image
-        img_path = os.path.join(path, img)
-        current_img = cv2.imread(img_path)
-        images.append(current_img)
-        
-        # Get person's name from filename (without extension)
-        name = os.path.splitext(img)[0]
-        classNames.append(name)
-        
-        # Convert image to binary for API upload
-        _, img_encoded = cv2.imencode('.jpg', current_img)
-        headers = {
-            'Ocp-Apim-Subscription-Key': subscription_key,
-            'Content-Type': 'application/octet-stream'
-        }
-        params = {
-            'returnFaceId': 'true',
-            'recognitionModel': 'recognition_04',
-            'returnFaceLandmarks': 'false'
-        }
-        response = requests.post(detect_url, headers=headers, params=params, data=img_encoded.tobytes())
-        if response.status_code == 200:
-            faces = response.json()
-            if faces:
-                face_ids[name] = faces[0]['faceId']
-        else:
-            print(f"Error processing {name}: {response.status_code}, {response.text}")
-    
-    return face_ids, classNames
-
-# Load background and mode images
-img_background = cv2.imread(r'Resources\background.png')
-active = cv2.imread(r'Resources\Modes\1.png')
-mode2 = cv2.imread(r'Resources\Modes\2.png')
-active = cv2.imread(r'Resources\Modes\3.png')    
-Already_marked = cv2.imread(r'Resources\Modes\4.png')
+# Load and encode known faces using face_recognition
+for img_name in os.listdir(path):
+    img_path = os.path.join(path, img_name)
+    img = face_recognition.load_image_file(img_path)
+    encodings = face_recognition.face_encodings(img)
+    if encodings:
+        known_encodings.append(encodings[0])
+        known_names.append(os.path.splitext(img_name)[0])
+    else:
+        print(f"Warning: No face found in {img_name}")
 
 # Initialize video capture
 cap = cv2.VideoCapture(0)
 cap.set(3, 640)
 cap.set(4, 480)
 
-# Load known faces
-face_ids, classNames = load_known_faces()
-
 while True:
     ret, frame = cap.read()
     if not ret:
+        print("Failed to grab frame from camera.")
         break
 
-    # Resize frame for processing
-    resize_frame = cv2.resize(frame, (640, 480))
-    
-    # Convert frame to binary for API upload
-    _, img_encoded = cv2.imencode('.jpg', resize_frame)
+    # Use Azure Face API to detect faces
+    _, img_encoded = cv2.imencode('.jpg', frame)
     headers = {
         'Ocp-Apim-Subscription-Key': subscription_key,
         'Content-Type': 'application/octet-stream'
     }
     params = {
-        'returnFaceId': 'true',
+        'returnFaceId': 'false',
         'recognitionModel': 'recognition_04',
         'returnFaceLandmarks': 'false'
     }
     response = requests.post(detect_url, headers=headers, params=params, data=img_encoded.tobytes())
+    face_locations = []
     if response.status_code == 200:
         faces = response.json()
         for face in faces:
-            face_id = face['faceId']
-            face_rectangle = face['faceRectangle']
-            
-            # Compare detected face with known faces
-            verify_url = f"{endpoint}/face/v1.0/verify"
-            for name, known_face_id in face_ids.items():
-                verify_data = {
-                    'faceId1': face_id,
-                    'faceId2': known_face_id
-                }
-                verify_response = requests.post(verify_url, headers={
-                    'Ocp-Apim-Subscription-Key': subscription_key,
-                    'Content-Type': 'application/json'
-                }, data=json.dumps(verify_data))
-                
-                if verify_response.status_code == 200:
-                    verify_result = verify_response.json()
-                    if verify_result['isIdentical']:
-                        # Draw rectangle around face
-                        x, y, w, h = face_rectangle['left'], face_rectangle['top'], face_rectangle['width'], face_rectangle['height']
-                        cv2.rectangle(resize_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        # Display name
-                        cv2.putText(resize_frame, name, (x, y-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-                        break
+            rect = face['faceRectangle']
+            # Azure gives left, top, width, height
+            top = rect['top']
+            right = rect['left'] + rect['width']
+            bottom = rect['top'] + rect['height']
+            left = rect['left']
+            face_locations.append((top, right, bottom, left))
+    else:
+        print(f"Azure error: {response.status_code}, {response.text}")
 
-    # Update background with processed frame
-    img_background[162:162+480, 55:55+640] = resize_frame
-    img_background[44:44+active.shape[0], 808:808+active.shape[1]] = active
+    # Use dlib/face_recognition for encoding and identification
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+    for (top, right, bottom, left), face_encoding in zip(face_locations, encodings):
+        matches = face_recognition.compare_faces(known_encodings, face_encoding)
+        name = "Unknown"
+        if True in matches:
+            name = known_names[matches.index(True)]
+        cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
+        cv2.putText(frame, name, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,255,0), 2)
 
-    # Display the frame
-    cv2.imshow('Video', img_background)
-
-    # Break the loop if 'q' is pressed
+    cv2.imshow('Video', frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
