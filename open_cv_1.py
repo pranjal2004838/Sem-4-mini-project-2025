@@ -3,6 +3,62 @@ import os
 import numpy as np
 import requests
 import face_recognition
+import pyodbc
+
+# Connection string parameters
+server = 'pranjal.database.windows.net'
+database = 'rtp_project'
+username = 'pranjal'
+password = 'Mysql875#'  # Replace this
+driver = 'Driver={ODBC Driver 18 for SQL Server};Server=tcp:pranjal.database.windows.net,1433;Database=rtp_project;Uid=pranjal;Pwd={your_password_here};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
+
+# Construct connection string
+conn_str = f"""
+    DRIVER={driver};
+    SERVER=tcp:{server},1433;
+    DATABASE={database};
+    UID={username};
+    PWD={password};
+    Encrypt=yes;
+    TrustServerCertificate=no;
+    Connection Timeout=30;
+"""
+
+# Connect to Azure SQL
+try:
+    conn = pyodbc.connect(conn_str)
+    cursor = conn.cursor()
+    print("✅ Connected successfully to Azure SQL Database!")
+
+    # Create a test table (if it doesn’t exist)
+    cursor.execute("""
+        IF NOT EXISTS (
+            SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'test_table'
+        )
+        CREATE TABLE test_table (
+            id INT IDENTITY PRIMARY KEY,
+            name NVARCHAR(100),
+            age INT
+        )
+    """)
+    conn.commit()
+
+    # Insert sample data
+    cursor.execute("INSERT INTO test_table (name, age) VALUES (?, ?)", ("Alice", 21))
+    conn.commit()
+
+    # Read data
+    cursor.execute("SELECT * FROM test_table")
+    rows = cursor.fetchall()
+    for row in rows:
+        print(row)
+
+except Exception as e:
+    print("❌ Connection failed:", e)
+
+
+
+
 
 # Azure Face API configuration
 endpoint = "https://rtp.cognitiveservices.azure.com/"
