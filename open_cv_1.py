@@ -5,17 +5,18 @@ import requests
 import face_recognition
 import pyodbc
 
-# Connection string parameters
-server = 'pranjal.database.windows.net'
-database = 'rtp_project'
-username = 'pranjal'
-password = 'Mysql875#'  # Replace this
-driver = 'Driver={ODBC Driver 18 for SQL Server};Server=tcp:pranjal.database.windows.net,1433;Database=rtp_project;Uid=pranjal;Pwd={your_password_here};Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;'
+import pyodbc
 
-# Construct connection string
+# Use exactly what pyodbc.drivers() shows
+driver = '{ODBC Driver 18 for SQL Server}'
+server = 'pranjal-sem2-rtp-project.database.windows.net'
+database = 'pranjal_project_sem2'
+username = 'pranjal'  # ← From your Azure SQL server info
+password = 'Mysql875#'  # ← Enter your real password here
+
 conn_str = f"""
     DRIVER={driver};
-    SERVER=tcp:{server},1433;
+    SERVER={server};
     DATABASE={database};
     UID={username};
     PWD={password};
@@ -24,37 +25,12 @@ conn_str = f"""
     Connection Timeout=30;
 """
 
-# Connect to Azure SQL
 try:
     conn = pyodbc.connect(conn_str)
-    cursor = conn.cursor()
-    print("✅ Connected successfully to Azure SQL Database!")
-
-    # Create a test table (if it doesn’t exist)
-    cursor.execute("""
-        IF NOT EXISTS (
-            SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'test_table'
-        )
-        CREATE TABLE test_table (
-            id INT IDENTITY PRIMARY KEY,
-            name NVARCHAR(100),
-            age INT
-        )
-    """)
-    conn.commit()
-
-    # Insert sample data
-    cursor.execute("INSERT INTO test_table (name, age) VALUES (?, ?)", ("Alice", 21))
-    conn.commit()
-
-    # Read data
-    cursor.execute("SELECT * FROM test_table")
-    rows = cursor.fetchall()
-    for row in rows:
-        print(row)
-
+    print("✅ Connected to Azure SQL!")
 except Exception as e:
     print("❌ Connection failed:", e)
+
 
 
 
