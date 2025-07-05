@@ -5,13 +5,14 @@ import face_recognition
 import pyodbc
 from datetime import datetime, time
 import csv
+import flask
 
 # Use exactly what pyodbc.drivers() shows
 driver = '{ODBC Driver 18 for SQL Server}'
-server = 'pranjal-sem2-rtp-project.database.windows.net'
-database = 'pranjal_project_sem2'
-username = 'pranjal'
-password = 'Mysql875#'
+server = 'rtp-2-2.database.windows.net'
+database = 'sem-2-rtp-project'
+username = 'user22'
+password = 'Azuresql22*'
 
 conn_str = (
     f"DRIVER={driver};"
@@ -20,8 +21,8 @@ conn_str = (
     f"UID={username};"
     f"PWD={password};"
     "Encrypt=yes;"
-    "TrustServerCertificate=yes;"
-    "Connection Timeout=30;"
+    "TrustServerCertificate=no;"
+    "Connection Timeout=300;"
 )
 
 try:
@@ -66,16 +67,26 @@ schedule = {
                (time(13,45), time(15,15),'PTSP'),
                (time(15,15), time(16,45),'ADC')
                ],
+    'Saturday': [(time(9,30), time(11,00),'EMTL'),
+                 (time(11,00), time(12,30),'ADC'),
+                 (time(13,45), time(15,15),'PTSP'),
+                 (time(15,15), time(16,45),'LDICA')],
 }
 now = datetime.now()
 today = now.strftime('%A')
 current_time = now.time()
-subject = 'General'
+subject = None
 
 for start, end, subj in schedule.get(today, []):
-    if start <= current_time < end:
+    if start <= current_time <= end:
         subject = subj
         break
+print(f"Today: {today}, Current time: {current_time}")
+
+if subject is None:
+    print("No class at this time.")
+    exit()
+
 
 # Initialize video capture
 cap = cv2.VideoCapture(0)
