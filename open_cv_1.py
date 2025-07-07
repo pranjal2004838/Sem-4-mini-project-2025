@@ -70,7 +70,12 @@ subject = None
 for start, end, subj in schedule.get(today, []):
     if start <= current_time <= end:
         subject = subj
+        if (datetime.combine(now.date(), current_time) - datetime.combine(now.date(), start)).total_seconds() > 15*60:
+            print(f"Class for {subj} has already started 15 mins ago. Attendance will not be recorded.")
+            exit()
+            exit()
         break
+    
 print(f"Today: {today}, Current time: {current_time}")
 
 if subject is None:
@@ -112,9 +117,16 @@ while True:
             student_id = known_ids[matches.index(True)]
 
             if student_id in valid_students and student_id not in seen_ids:
-                seen_ids.add(student_id)
-                cursor.execute("INSERT INTO attendance_logs (student_id, subject) VALUES (?, ?)", (student_id, subject))
-                conn.commit()
+                # Check if attendance already marked for this student and subject today
+                cursor.execute(
+                    "SELECT COUNT(*) FROM attendance_logs WHERE student_id = ? AND subject = ? AND CAST(timestamp AS DATE) = CAST(GETDATE() AS DATE)",
+                    (student_id, subject)
+                )
+                already_marked = cursor.fetchone()[0]
+                if not already_marked:
+                    seen_ids.add(student_id)
+                    cursor.execute("INSERT INTO attendance_logs (student_id, subject) VALUES (?, ?)", (student_id, subject))
+                    conn.commit()
 
         cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
         cv2.putText(frame, student_id, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,255,0), 2)
@@ -130,19 +142,44 @@ cv2.destroyAllWindows()
 summary_filename = "attendance_summary.csv"
 subjects = ['PTSP', 'EMTL', 'ADC', 'LDICA', 'ECA', 'ECA LAB', 'LDICA LAB', 'ADC LAB', 'GS LAB']
 
-# Prepare student data structure
+# Prepare student data structure and calculate total conducted hours per subject
 summary_data = []
+subject_conducted = {}
+subject_duration = {}
+for sub in subjects:
+    # Count unique days class was conducted for this subject
+    cursor.execute("SELECT COUNT(DISTINCT CAST(timestamp AS DATE)) FROM attendance_logs WHERE subject = ?", (sub,))
+    conducted = cursor.fetchone()[0]
+    subject_conducted[sub] = conducted
+    # Get duration from schedule (first found)
+    dur = None
+    for slots in schedule.values():
+        for start, end, s in slots:
+            if s.upper() == sub.upper():
+                dur = (datetime.combine(datetime.today(), end) - datetime.combine(datetime.today(), start)).total_seconds() / 3600
+                break
+        if dur is not None:
+            break
+    subject_duration[sub] = dur if dur is not None else 0
+
+total_hours_conducted = sum(subject_conducted[sub] * subject_duration[sub] for sub in subjects)
+
 for idx, student_id in enumerate(valid_students, start=1):
     row = {'S.NO': idx, 'Student ID': student_id}
+    attended_hours = 0
     for sub in subjects:
         cursor.execute("SELECT COUNT(*) FROM attendance_logs WHERE student_id = ? AND subject = ?", (student_id, sub))
-        row[sub] = cursor.fetchone()[0]
+        attended = cursor.fetchone()[0]
+        row[sub] = attended
+        attended_hours += attended * subject_duration[sub]
     row['TOTAL'] = sum(row[sub] for sub in subjects)
+    # Calculate percentage
+    row['PERCENTAGE'] = round((attended_hours / total_hours_conducted) * 100, 2) if total_hours_conducted > 0 else 0
     summary_data.append(row)
 
-# Write summary CSV
+# Write summary CSV with percentage
 with open(summary_filename, 'w', newline='') as csvfile:
-    fieldnames = ['S.NO', 'Student ID'] + subjects + ['TOTAL']
+    fieldnames = ['S.NO', 'Student ID'] + subjects + ['TOTAL', 'PERCENTAGE']
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
     writer.writeheader()
     for row in summary_data:
