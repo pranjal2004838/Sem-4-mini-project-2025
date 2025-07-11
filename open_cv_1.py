@@ -1,188 +1,268 @@
+import streamlit as st
 import cv2
 import os
 import numpy as np
 import face_recognition
 import pyodbc
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import csv
+from fpdf import FPDF
 
-# Use exactly what pyodbc.drivers() shows
-driver = '{ODBC Driver 18 for SQL Server}'
-server = 'rtp.database.windows.net'
-database = 'rtp'
-username = 'user22'
-password = 'Azuresql22*'
+# === Admin Credentials ===
+admin_username = "teacher"
+admin_password = "admin123"
 
-conn_str = (
-    f"DRIVER={driver};"
-    f"SERVER={server};"
-    f"DATABASE={database};"
-    f"UID={username};"
-    f"PWD={password};"
-    "Encrypt=yes;"
-    "TrustServerCertificate=no;"
-    "Connection Timeout=300;"
-)
+# === Streamlit Config ===
+st.set_page_config(page_title="Face Recognition Attendance", layout="centered", page_icon="📸")
 
-try:
-    conn = pyodbc.connect(conn_str)
-    print("✅ Connected to Azure SQL!")
-    cursor = conn.cursor()
-except Exception as e:
-    print("❌ Connection failed:", e)
+# === Login Flow Control ===
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
-# Only include students 401 to 464
-valid_students = [str(i) for i in range(401, 465)]
+if not st.session_state.logged_in:
+    st.markdown("""
+        <style>
+        .main {
+            background-color: #f0f2f6;
+        }
+        .stForm>form {
+            background: #ffffff;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-# Path to the directory containing known face images
-path = r'student_images'
-known_encodings = []
-known_ids = []
+    st.markdown("""
+    # 🛡️ Teacher Login
+    Please login below to access the admin dashboard.
+    """)
 
-# Load and encode known faces using face_recognition
-for img_name in os.listdir(path):
-    student_id = os.path.splitext(img_name)[0]
-    if student_id not in valid_students:
-        continue
-    img_path = os.path.join(path, img_name)
-    img = face_recognition.load_image_file(img_path)
-    encodings = face_recognition.face_encodings(img)
-    if encodings:
-        known_encodings.append(encodings[0])
-        known_ids.append(student_id)
-    else:
-        print(f"Warning: No face found in {img_name}")
+    with st.form("login_form"):
+        username_input = st.text_input("👤 Username")
+        password_input = st.text_input("🔒 Password", type="password")
+        login_btn = st.form_submit_button("🔓 Login")
 
-# === Day-wise subject detection based on time ===
-schedule = {
-    'Monday': [(time(9,30), time(11,30),'GS LAB'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'LDICA')],
-    'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC'), (time(13,45), time(15,45),'LDICA LAB')],
-    'Wednesday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'LDICA'), (time(13,45), time(15,45),'LDICA LAB')],
-    'Thursday': [(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
-    'Friday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'ADC')],
-    'Saturday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'ADC'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'LDICA')],
-}
+    if login_btn:
+        if username_input == admin_username and password_input == admin_password:
+            st.session_state["logged_in"] = True
+            st.success("✅ Login successful")
+            st.rerun()
+        else:
+            st.error("❌ Invalid credentials")
 
-now = datetime.now()
-today = now.strftime('%A')
-current_time = now.time()
-subject = None
-for start, end, subj in schedule.get(today, []):
-    if start <= current_time <= end:
-        subject = subj
-        if (datetime.combine(now.date(), current_time) - datetime.combine(now.date(), start)).total_seconds() > 15*60:
-            print(f"Class for {subj} has already started 15 mins ago. Attendance will not be recorded.")
-            exit()
-            exit()
-        break
-    
-print(f"Today: {today}, Current time: {current_time}")
+# === Main App Interface ===
+if st.session_state.logged_in:
+    st.markdown("""
+    <h2 style='text-align: center;'>📸 Face Recognition Attendance System</h2>
+    <hr style='margin-bottom: 30px;'>
+    """, unsafe_allow_html=True)
 
-if subject is None:
-    print("No class at this time.")
-    exit()
+    if st.button("🔒 Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
 
-# Create attendance_logs table if not exists
-cursor.execute("""
-    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'attendance_logs')
-    CREATE TABLE attendance_logs (
-        id INT IDENTITY PRIMARY KEY,
-        student_id NVARCHAR(50),
-        subject NVARCHAR(100),
-        timestamp DATETIME DEFAULT GETDATE()
+    driver = '{ODBC Driver 18 for SQL Server}'
+    server = 'rtp.database.windows.net'
+    database = 'rtp'
+    username = 'user22'
+    password = 'Azuresql22*'
+
+    conn_str = (
+        f"DRIVER={driver};"
+        f"SERVER={server};"
+        f"DATABASE={database};"
+        f"UID={username};"
+        f"PWD={password};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=300;"
     )
-""")
-conn.commit()
 
-# Initialize video capture
-cap = cv2.VideoCapture(0)
-cap.set(3, 640)
-cap.set(4, 480)
-seen_ids = set()
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+        st.success("✅ Connected to Azure SQL!")
+    except Exception as e:
+        st.error(f"❌ Failed to connect to Azure SQL: {e}")
+        st.stop()
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to grab frame from camera.")
-        break
+    # === Student Management ===
+    st.subheader("👨‍🎓 Add / Remove / Modify Students")
+    with st.form("student_form"):
+        student_id = st.text_input("Student ID (e.g. 401)")
+        action = st.selectbox("Action", ["Add", "Remove", "Modify"])
+        name = st.text_input("Full Name (only for Add/Modify)")
+        photo = st.file_uploader("Upload Student Image (JPG/PNG)", type=["jpg", "jpeg", "png"])
+        submitted = st.form_submit_button("Submit")
+        if submitted:
+            image_folder = 'student_images'
+            os.makedirs(image_folder, exist_ok=True)
+            image_path = os.path.join(image_folder, f"{student_id}.jpg")
 
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_frame)
-    encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+            if action == "Add":
+                cursor.execute("INSERT INTO students (student_id, name) VALUES (?, ?)", (student_id, name))
+                conn.commit()
+                if photo is not None:
+                    with open(image_path, "wb") as f:
+                        f.write(photo.read())
+                st.success("✅ Student added successfully.")
+            elif action == "Remove":
+                cursor.execute("DELETE FROM students WHERE student_id = ?", (student_id,))
+                conn.commit()
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                st.success("🗑️ Student removed successfully.")
+            elif action == "Modify":
+                cursor.execute("UPDATE students SET name = ? WHERE student_id = ?", (name, student_id))
+                conn.commit()
+                if photo is not None:
+                    with open(image_path, "wb") as f:
+                        f.write(photo.read())
+                st.success("✏️ Student updated successfully.")
 
-    for (top, right, bottom, left), face_encoding in zip(face_locations, encodings):
-        matches = face_recognition.compare_faces(known_encodings, face_encoding)
-        student_id = "Unknown"
-        if True in matches:
-            student_id = known_ids[matches.index(True)]
+    # === Face Recognition Attendance ===
+    st.subheader("📷 Start Webcam Attendance")
+    if st.button("Start Attendance Session"):
+        subject = None
+        now = datetime.now()
+        today = now.strftime('%A')
+        current_time = now.time()
 
-            if student_id in valid_students and student_id not in seen_ids:
-                # Check if attendance already marked for this student and subject today
-                cursor.execute(
-                    "SELECT COUNT(*) FROM attendance_logs WHERE student_id = ? AND subject = ? AND CAST(timestamp AS DATE) = CAST(GETDATE() AS DATE)",
-                    (student_id, subject)
-                )
-                already_marked = cursor.fetchone()[0]
-                if not already_marked:
-                    seen_ids.add(student_id)
-                    cursor.execute("INSERT INTO attendance_logs (student_id, subject) VALUES (?, ?)", (student_id, subject))
-                    conn.commit()
+        schedule = {
+            'Monday': [(time(9,30), time(11,30),'GS LAB'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'LDICA')],
+            'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC'), (time(13,45), time(15,45),'LDICA LAB')],
+            'Wednesday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'LDICA'), (time(13,45), time(15,45),'LDICA LAB')],
+            'Thursday': [(time(9,00),time(10,00),'ADC'),(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
+            'Friday': [(time(9,00), time(11,0),'ECA'), (time(11,0), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(21,00), time(22,45),'ADC')]
+        }
 
-        cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
-        cv2.putText(frame, student_id, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,255,0), 2)
-
-    cv2.imshow('Video', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
-
-# === Export summary attendance to CSV ===
-summary_filename = "attendance_summary.csv"
-subjects = ['PTSP', 'EMTL', 'ADC', 'LDICA', 'ECA', 'ECA LAB', 'LDICA LAB', 'ADC LAB', 'GS LAB']
-
-# Prepare student data structure and calculate total conducted hours per subject
-summary_data = []
-subject_conducted = {}
-subject_duration = {}
-for sub in subjects:
-    # Count unique days class was conducted for this subject
-    cursor.execute("SELECT COUNT(DISTINCT CAST(timestamp AS DATE)) FROM attendance_logs WHERE subject = ?", (sub,))
-    conducted = cursor.fetchone()[0]
-    subject_conducted[sub] = conducted
-    # Get duration from schedule (first found)
-    dur = None
-    for slots in schedule.values():
-        for start, end, s in slots:
-            if s.upper() == sub.upper():
-                dur = (datetime.combine(datetime.today(), end) - datetime.combine(datetime.today(), start)).total_seconds() / 3600
+        for start, end, subj in schedule.get(today, []):
+            # Allow attendance only within 15 minutes from class start
+            attendance_window_end = (datetime.combine(datetime.today(), start) + 
+                         timedelta(minutes=15)).time()
+            if start <= current_time <= attendance_window_end:
+                subject = subj
                 break
-        if dur is not None:
-            break
-    subject_duration[sub] = dur if dur is not None else 0
+        else:
+            st.warning("Attendance window closed.")
+            st.stop()
 
-total_hours_conducted = sum(subject_conducted[sub] * subject_duration[sub] for sub in subjects)
+        if subject is None:
+            st.warning("No class at this time.")
+            st.stop()
 
-for idx, student_id in enumerate(valid_students, start=1):
-    row = {'S.NO': idx, 'Student ID': student_id}
-    attended_hours = 0
-    for sub in subjects:
-        cursor.execute("SELECT COUNT(*) FROM attendance_logs WHERE student_id = ? AND subject = ?", (student_id, sub))
-        attended = cursor.fetchone()[0]
-        row[sub] = attended
-        attended_hours += attended * subject_duration[sub]
-    row['TOTAL'] = sum(row[sub] for sub in subjects)
-    # Calculate percentage
-    row['PERCENTAGE'] = round((attended_hours / total_hours_conducted) * 100, 2) if total_hours_conducted > 0 else 0
-    summary_data.append(row)
+        image_folder = 'student_images'
+        known_encodings = []
+        known_ids = []
+        for img_name in os.listdir(image_folder):
+            student_id = os.path.splitext(img_name)[0]
+            img_path = os.path.join(image_folder, img_name)
+            img = face_recognition.load_image_file(img_path)
+            enc = face_recognition.face_encodings(img)
+            if enc:
+                known_encodings.append(enc[0])
+                known_ids.append(student_id)
 
-# Write summary CSV with percentage
-with open(summary_filename, 'w', newline='') as csvfile:
-    fieldnames = ['S.NO', 'Student ID'] + subjects + ['TOTAL', 'PERCENTAGE']
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    writer.writeheader()
-    for row in summary_data:
-        writer.writerow(row)
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        seen = set()
+        stframe = st.empty()
+        if "stop_camera" not in st.session_state:
+            st.session_state["stop_camera"] = False
+        if st.button("⏹️ Stop Camera", key="stop_camera_btn"):
+            st.session_state["stop_camera"] = True
 
-print(f"✅ Summary exported to {summary_filename}")
+        while not st.session_state["stop_camera"]:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            faces = face_recognition.face_locations(rgb)
+            encodings = face_recognition.face_encodings(rgb, faces)
+            for (top, right, bottom, left), enc in zip(faces, encodings):
+                matches = face_recognition.compare_faces(known_encodings, enc)
+                student_id = "Unknown"
+                if True in matches:
+                    student_id = known_ids[matches.index(True)]
+                    if student_id not in seen:
+                        cursor.execute("""
+                            SELECT COUNT(*) FROM attendance_logs
+                            WHERE student_id=? AND subject=? AND CAST(timestamp AS DATE)=CAST(GETDATE() AS DATE)
+                        """, (student_id, subject))
+                        already = cursor.fetchone()[0]
+                        if not already:
+                            cursor.execute("INSERT INTO attendance_logs (student_id, subject) VALUES (?, ?)", (student_id, subject))
+                            conn.commit()
+                            seen.add(student_id)
+                cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
+                cv2.putText(frame, student_id, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,255,0), 2)
+            stframe.image(frame, channels="BGR")
+            
+        cap.release()
+        cv2.destroyAllWindows()
+        ...
+        st.success("✅ Attendance marked successfully.")
+
+    # === Full CSV and PDF Summary Export ===
+    st.subheader("📄 Download Attendance Summary")
+    if st.button("📤 Generate CSV & PDF Report", key="generate_report"):
+        subjects = ['PTSP', 'EMTL', 'ADC', 'LDICA', 'ECA', 'ECA LAB', 'LDICA LAB', 'ADC LAB', 'GS LAB']
+        students = [str(i) for i in range(401, 465)]
+        summary_data = []
+        subject_totals = {}
+
+        # Calculate total number of classes conducted for each subject
+        for subj in subjects:
+            cursor.execute("SELECT COUNT(DISTINCT CAST(timestamp AS DATE)) FROM attendance_logs WHERE subject = ?", (subj,))
+            subject_totals[subj] = cursor.fetchone()[0]
+
+        total_classes = sum(subject_totals.values())
+
+        for idx, student_id in enumerate(students, start=1):
+            row = {'S.NO': idx, 'Student ID': student_id}
+            attended_total = 0
+            for subj in subjects:
+                cursor.execute("SELECT COUNT(*) FROM attendance_logs WHERE student_id = ? AND subject = ?", (student_id, subj))
+                attended = cursor.fetchone()[0]
+                row[subj] = attended
+                attended_total += attended
+            row['TOTAL'] = attended_total
+            row['PERCENTAGE'] = round((attended_total / total_classes) * 100, 2) if total_classes else 0
+            summary_data.append(row)
+
+        # Add last row for class totals
+        total_row = {'S.NO': '', 'Student ID': 'CLASSES HELD'}
+        total_sum = 0
+        for subj in subjects:
+            total_row[subj] = subject_totals[subj]
+            total_sum += subject_totals[subj]
+        total_row['TOTAL'] = total_sum
+        total_row['PERCENTAGE'] = ''
+
+        csv_file = 'attendance_summary.csv'
+        with open(csv_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=['S.NO', 'Student ID'] + subjects + ['TOTAL', 'PERCENTAGE'])
+            writer.writeheader()
+            for row in summary_data:
+                writer.writerow(row)
+            writer.writerow(total_row)
+
+        # Generate PDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=8)
+        pdf.cell(200, 10, txt="Semester Attendance Report", ln=True, align='C')
+        with open(csv_file, newline='') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                line = " | ".join(row)
+                pdf.cell(0, 6, txt=line, ln=True)
+        pdf_file = 'attendance_summary.pdf'
+        pdf.output(pdf_file)
+
+        st.success("✅ Attendance report generated!")
+        with open(csv_file, "rb") as f:
+            st.download_button("⬇️ Download CSV", key="download_csv", data=f, file_name=csv_file, mime="text/csv")
+        with open(pdf_file, "rb") as f:
+            st.download_button("⬇️ Download PDF", key="download_pdf", data=f, file_name=pdf_file, mime="application/pdf")
