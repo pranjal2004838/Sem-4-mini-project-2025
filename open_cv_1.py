@@ -7,10 +7,11 @@ import pyodbc
 from datetime import datetime, time, timedelta
 import csv
 from fpdf import FPDF
+import pandas as pd
 
 # === Admin Credentials ===
 admin_username = "teacher"
-admin_password = "admin123"
+admin_password = "Jnadmin123"
 
 # === Streamlit Config ===
 st.set_page_config(page_title="Face Recognition Attendance", layout="centered", page_icon="📸")
@@ -83,10 +84,24 @@ if st.session_state.logged_in:
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
-        st.success("✅ Connected to Azure SQL!")
+        st.success("✅ Connected to Database")
     except Exception as e:
-        st.error(f"❌ Failed to connect to Azure SQL: {e}")
+        st.error(f"❌ Failed to connect to Database: {e}")
         st.stop()
+
+
+    # === CLEAR ATTENDANCE LOGS FOR FRESH START ===
+    cursor.execute("DELETE FROM attendance_logs")
+    conn.commit()
+
+    cursor.execute("""
+    IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'students')
+    CREATE TABLE students (
+        student_id NVARCHAR(20) PRIMARY KEY,
+        name NVARCHAR(100)
+    )
+""")
+    conn.commit()
 
     # === Student Management ===
     st.subheader("👨‍🎓 Add / Remove / Modify Students")
@@ -102,25 +117,34 @@ if st.session_state.logged_in:
             image_path = os.path.join(image_folder, f"{student_id}.jpg")
 
             if action == "Add":
-                cursor.execute("INSERT INTO students (student_id, name) VALUES (?, ?)", (student_id, name))
-                conn.commit()
-                if photo is not None:
-                    with open(image_path, "wb") as f:
-                        f.write(photo.read())
-                st.success("✅ Student added successfully.")
+                if os.path.exists(image_path):
+                    st.error("❌ Student already present. Kindly modify or delete.")
+                else:
+                    cursor.execute("INSERT INTO students (student_id, name) VALUES (?, ?)", (student_id, name))
+                    conn.commit()
+                    if photo is not None:
+                        with open(image_path, "wb") as f:
+                            f.write(photo.read())
+                        st.success("✅ Student and image added successfully.")
+                    else:
+                        st.warning("Student added, but no image uploaded.")
             elif action == "Remove":
                 cursor.execute("DELETE FROM students WHERE student_id = ?", (student_id,))
                 conn.commit()
+                # Remove image if exists
                 if os.path.exists(image_path):
                     os.remove(image_path)
-                st.success("🗑️ Student removed successfully.")
+                st.success("🗑️ Student and image removed successfully.")
             elif action == "Modify":
                 cursor.execute("UPDATE students SET name = ? WHERE student_id = ?", (name, student_id))
                 conn.commit()
+                # Update image if new photo uploaded
                 if photo is not None:
                     with open(image_path, "wb") as f:
                         f.write(photo.read())
-                st.success("✏️ Student updated successfully.")
+                    st.success("✏️ Student and image updated successfully.")
+                else:
+                    st.success("✏️ Student info updated (no image change).")
 
     # === Face Recognition Attendance ===
     st.subheader("📷 Start Webcam Attendance")
@@ -135,13 +159,13 @@ if st.session_state.logged_in:
             'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC'), (time(13,45), time(15,45),'LDICA LAB')],
             'Wednesday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'LDICA'), (time(13,45), time(15,45),'LDICA LAB')],
             'Thursday': [(time(9,00),time(10,00),'ADC'),(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
-            'Friday': [(time(9,00), time(11,0),'ECA'), (time(11,0), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(21,00), time(22,45),'ADC')]
+            'Saturday': [(time(9,00), time(11,0),'ECA'), (time(11,0), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(19,10), time(20,40),'ADC')]
         }
 
         for start, end, subj in schedule.get(today, []):
             # Allow attendance only within 15 minutes from class start
             attendance_window_end = (datetime.combine(datetime.today(), start) + 
-                         timedelta(minutes=15)).time()
+                         timedelta(minutes=30)).time()
             if start <= current_time <= attendance_window_end:
                 subject = subj
                 break
@@ -223,7 +247,7 @@ if st.session_state.logged_in:
             row = {'S.NO': idx, 'Student ID': student_id}
             attended_total = 0
             for subj in subjects:
-                cursor.execute("SELECT COUNT(*) FROM attendance_logs WHERE student_id = ? AND subject = ?", (student_id, subj))
+                cursor.execute("SELECT COUNT(DISTINCT CAST(timestamp AS DATE)) FROM attendance_logs WHERE student_id = ? AND subject = ?", (student_id, subj))
                 attended = cursor.fetchone()[0]
                 row[subj] = attended
                 attended_total += attended
