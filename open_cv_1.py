@@ -154,7 +154,11 @@ if st.session_state.logged_in:
             'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC')],
             'Wednesday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'LDICA'), (time(13,45), time(15,45),'LDICA LAB')],
             'Thursday': [(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
+<<<<<<< HEAD
             'Sunday': [(time(9,30), time(11,00),'ECA'), (time(11,00), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(17,15), time(18,45),'ADC')]
+=======
+            'Friday': [(time(9,30), time(11,00),'ECA'), (time(11,00), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'ADC')]
+>>>>>>> aea2343c5e305e7cfa1c2b7970788d202f1c1f00
         }
 
         for start, end, subj in schedule.get(today, []):
