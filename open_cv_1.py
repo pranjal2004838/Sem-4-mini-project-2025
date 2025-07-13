@@ -89,11 +89,6 @@ if st.session_state.logged_in:
         st.error(f"❌ Failed to connect to Database: {e}")
         st.stop()
 
-
-    # === CLEAR ATTENDANCE LOGS FOR FRESH START ===
-    cursor.execute("DELETE FROM attendance_logs")
-    conn.commit()
-
     cursor.execute("""
     IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'students')
     CREATE TABLE students (
@@ -156,10 +151,10 @@ if st.session_state.logged_in:
 
         schedule = {
             'Monday': [(time(9,30), time(11,30),'GS LAB'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'LDICA')],
-            'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC'), (time(13,45), time(15,45),'LDICA LAB')],
+            'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC')],
             'Wednesday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'LDICA'), (time(13,45), time(15,45),'LDICA LAB')],
-            'Thursday': [(time(9,00),time(10,00),'ADC'),(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
-            'Saturday': [(time(9,00), time(11,0),'ECA'), (time(11,0), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(19,10), time(20,40),'ADC')]
+            'Thursday': [(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
+            'Friday': [(time(9,30), time(11,00),'ECA'), (time(11,00), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'ADC')]
         }
 
         for start, end, subj in schedule.get(today, []):
