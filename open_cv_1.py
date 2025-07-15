@@ -150,15 +150,11 @@ if st.session_state.logged_in:
         current_time = now.time()
 
         schedule = {
-            'Monday': [(time(9,30), time(11,30),'GS LAB'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'LDICA')],
-            'Tuesday': [(time(9,30), time(11,0),'ECA'), (time(11,0), time(12,30),'ADC')],
+            'Monday': [(time(8,15), time(9,30),'GS LAB'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'LDICA')],
+            'Tuesday': [(time(8,15), time(9,0),'ECA'), (time(11,0), time(12,30),'ADC')],
             'Wednesday': [(time(9,30), time(11,0),'EMTL'), (time(11,0), time(12,30),'LDICA'), (time(13,45), time(15,45),'LDICA LAB')],
             'Thursday': [(time(9,30), time(11,30),'ECA LAB'), (time(13,45), time(15,45),'ADC LAB')],
-<<<<<<< HEAD
-            'Sunday': [(time(9,30), time(11,00),'ECA'), (time(11,00), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(17,15), time(18,45),'ADC')]
-=======
-            'Friday': [(time(9,30), time(11,00),'ECA'), (time(11,00), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(15,15), time(16,45),'ADC')]
->>>>>>> aea2343c5e305e7cfa1c2b7970788d202f1c1f00
+            'Friday': [(time(9,30), time(11,00),'ECA'), (time(11,00), time(12,30),'EMTL'), (time(13,45), time(15,15),'PTSP'), (time(17,15), time(18,45),'ADC')]
         }
 
         for start, end, subj in schedule.get(today, []):
@@ -203,21 +199,28 @@ if st.session_state.logged_in:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             faces = face_recognition.face_locations(rgb)
             encodings = face_recognition.face_encodings(rgb, faces)
+            threshold = 0.45  # Lower is stricter, adjust as needed
             for (top, right, bottom, left), enc in zip(faces, encodings):
-                matches = face_recognition.compare_faces(known_encodings, enc)
-                student_id = "Unknown"
-                if True in matches:
-                    student_id = known_ids[matches.index(True)]
-                    if student_id not in seen:
-                        cursor.execute("""
-                            SELECT COUNT(*) FROM attendance_logs
-                            WHERE student_id=? AND subject=? AND CAST(timestamp AS DATE)=CAST(GETDATE() AS DATE)
-                        """, (student_id, subject))
-                        already = cursor.fetchone()[0]
-                        if not already:
-                            cursor.execute("INSERT INTO attendance_logs (student_id, subject) VALUES (?, ?)", (student_id, subject))
-                            conn.commit()
-                            seen.add(student_id)
+                distances = face_recognition.face_distance(known_encodings, enc)
+                if len(distances) > 0:
+                    min_distance = np.min(distances)
+                    best_match_index = np.argmin(distances)
+                    if min_distance < threshold:
+                        student_id = known_ids[best_match_index]
+                        if student_id not in seen:
+                            cursor.execute("""
+                                SELECT COUNT(*) FROM attendance_logs
+                                WHERE student_id=? AND subject=? AND CAST(timestamp AS DATE)=CAST(GETDATE() AS DATE)
+                            """, (student_id, subject))
+                            already = cursor.fetchone()[0]
+                            if not already:
+                                cursor.execute("INSERT INTO attendance_logs (student_id, subject) VALUES (?, ?)", (student_id, subject))
+                                conn.commit()
+                                seen.add(student_id)
+                    else:
+                        student_id = "Unknown"
+                else:
+                    student_id = "Unknown"
                 cv2.rectangle(frame, (left, top), (right, bottom), (0,255,0), 2)
                 cv2.putText(frame, student_id, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,255,0), 2)
             stframe.image(frame, channels="BGR")
